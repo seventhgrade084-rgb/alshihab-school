@@ -394,46 +394,87 @@ tr:hover td{background:#f5f3ff}
 
 </div>
 
+<!-- Firebase SDK -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+  /* ================================================================
+     🔥 إعدادات Firebase — استبدل هذه القيم بإعدادات مشروعك
+     للحصول عليها: console.firebase.google.com
+     ================================================================ */
+  const firebaseConfig = {
+    apiKey:            "AIzaSyA6L6SICiaOy8lfPiaLVU_24On_KloJIhE",
+    authDomain:        "myspace-e9321.firebaseapp.com",
+    projectId:         "myspace-e9321",
+    storageBucket:     "Rmyspace-e9321.firebasestorage.app",
+    messagingSenderId: "R63318477126",
+    appId:             "1:63318477126:web:28d24ada43e9071fa0bd47"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db  = getFirestore(app);
+
+  /* نوافذ عامة يستخدمها بقية الكود */
+  window._fbDb = db;
+  window._fbDoc = doc;
+  window._fbGetDoc = getDoc;
+  window._fbSetDoc = setDoc;
+  window._fbReady = true;
+
+  /* بدء التهيئة بعد جاهزية Firebase */
+  window.dispatchEvent(new Event('firebase-ready'));
+</script>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 /* ====================================================================
-   مدرسة الشهاب المنير الافتراضية — تخزين سحابي عبر Anthropic API
-   البيانات تُحفظ وتُسترجع من السحابة وتكون متاحة من أي جهاز.
+   مدرسة الشهاب المنير الافتراضية — تخزين سحابي عبر Firebase Firestore
+   البيانات تُحفظ وتُسترجع من السحابة وتكون متاحة من أي جهاز وأي موقع.
    ==================================================================== */
-const LS_KEY = 'ams_students_v1';
+const LS_KEY   = 'ams_students_v1';
 const LS_ADMIN = 'ams_admin_v1';
 const ADMIN_DEFAULT = { email: 'admin@alshihab.edu', pass: 'Admin@2026' };
+const FB_COLLECTION = 'school';
+const FB_DOC_ID     = 'students';
 
-/* --- تخزين سحابي --- */
 let _cloudStudents = null;
-let _cloudSynced = false;
 
-async function cloudGet(key){
-  try {
-    const res = await window.storage.get(key, true);
-    return res ? JSON.parse(res.value) : null;
-  } catch(e){ return null; }
-}
-async function cloudSet(key, val){
-  try {
-    await window.storage.set(key, JSON.stringify(val), true);
-  } catch(e){ console.error('Cloud save error', e); }
+function setIndicator(msg){
+  const el = document.getElementById('cloudIndicator');
+  if(el) el.textContent = msg;
 }
 
+/* --- قراءة من Firestore --- */
+async function cloudGet(){
+  try {
+    const ref  = window._fbDoc(window._fbDb, FB_COLLECTION, FB_DOC_ID);
+    const snap = await window._fbGetDoc(ref);
+    return snap.exists() ? (snap.data().list || []) : [];
+  } catch(e){ console.error('Firebase read error', e); return null; }
+}
+
+/* --- حفظ في Firestore --- */
+async function cloudSet(arr){
+  try {
+    const ref = window._fbDoc(window._fbDb, FB_COLLECTION, FB_DOC_ID);
+    await window._fbSetDoc(ref, { list: arr, updatedAt: new Date().toISOString() });
+    return true;
+  } catch(e){ console.error('Firebase write error', e); return false; }
+}
+
+/* --- تهيئة السحابة --- */
 async function initCloud(){
-  const indicator = document.getElementById('cloudIndicator');
-  if(indicator) indicator.textContent = '☁️ جارٍ المزامنة...';
-  _cloudStudents = await cloudGet(LS_KEY) || [];
-  /* دمج البيانات المحلية مع السحابة عند أول تشغيل */
-  const local = JSON.parse(localStorage.getItem(LS_KEY) || '[]');
-  if(local.length > 0){
-    const ids = new Set(_cloudStudents.map(r=>r.id));
-    local.forEach(r=>{ if(!ids.has(r.id)) _cloudStudents.push(r); });
-    await cloudSet(LS_KEY, _cloudStudents);
-    localStorage.removeItem(LS_KEY);
+  setIndicator('☁️ جارٍ الاتصال بـ Firebase...');
+  const remote = await cloudGet();
+  if(remote !== null){
+    _cloudStudents = remote;
+    setIndicator('☁️ متزامن مع Firebase ✓');
+  } else {
+    /* fallback محلي */
+    _cloudStudents = JSON.parse(localStorage.getItem(LS_KEY) || '[]');
+    setIndicator('⚠️ وضع محلي — تحقق من إعدادات Firebase');
   }
-  _cloudSynced = true;
-  if(indicator) indicator.textContent = '☁️ متزامن مع السحابة';
 }
 
 function getAdmin(){
@@ -442,11 +483,12 @@ function getAdmin(){
   return JSON.parse(a);
 }
 function getStudents(){ return _cloudStudents || []; }
-function saveStudents(arr){
+async function saveStudents(arr){
   _cloudStudents = arr;
-  cloudSet(LS_KEY, arr);
-  const indicator = document.getElementById('cloudIndicator');
-  if(indicator){ indicator.textContent = '☁️ تم الحفظ في السحابة ✓'; setTimeout(()=>indicator.textContent='☁️ متزامن مع السحابة',2000); }
+  setIndicator('☁️ جارٍ الحفظ...');
+  const ok = await cloudSet(arr);
+  setIndicator(ok ? '☁️ تم الحفظ في Firebase ✓' : '⚠️ خطأ في الحفظ');
+  setTimeout(()=> setIndicator('☁️ متزامن مع Firebase ✓'), 2500);
 }
 function nextCode(arr){
   const n = arr.length + 1;
@@ -494,7 +536,7 @@ document.getElementById('tabStudentLogin').addEventListener('click',()=>showTab(
 document.getElementById('tabAdminLogin').addEventListener('click',()=>showTab('adm'));
 
 /* ===== تسجيل طالب جديد ===== */
-function submitForm(){
+async function submitForm(){
   const req=[
     {id:'fname',l:'اسم الطالب'},{id:'lname',l:'الكنية'},{id:'father',l:'اسم الأب'},
     {id:'grandfather',l:'اسم الجد'},{id:'mother',l:'اسم الأم'},{id:'grade',l:'الصف'},
@@ -546,7 +588,7 @@ function submitForm(){
     createdAt: new Date().toISOString()
   };
   arr.push(record);
-  saveStudents(arr);
+  await saveStudents(arr);
 
   ['fname','lname','father','grandfather','mother','whatsapp','mobile','notes','city','street','addressDetail','regPass'].forEach(id=>document.getElementById(id).value='');
   ['country','province','grade'].forEach(id=>document.getElementById(id).value='');
@@ -606,7 +648,7 @@ function renderStudentPanel(rec){
   document.getElementById('stEditNotes').value = rec.notes||'';
   document.getElementById('stEditPass').value = '';
 }
-function saveStudentEdits(){
+async function saveStudentEdits(){
   const id = sessionStorage.getItem('ams_student_session');
   const arr = getStudents();
   const idx = arr.findIndex(r=>r.id===id);
@@ -656,7 +698,7 @@ function saveStudentEdits(){
   };
   if(newPass) arr[idx].password = newPass;
 
-  saveStudents(arr);
+  await saveStudents(arr);
   renderStudentPanel(arr[idx]);
   document.getElementById('studentNameTxt').textContent = arr[idx].fname+' '+arr[idx].lname+' ('+arr[idx].code+')';
   msg.innerHTML = '<div class="success" style="padding:10px"><p style="font-size:14px">✅ تم حفظ التعديلات بنجاح</p></div>';
@@ -877,13 +919,13 @@ function clearSelBar(){
   document.getElementById('selBar').classList.remove('show');
   document.getElementById('selCount').textContent = '0 محدد';
 }
-function deleteSelected(){
+async function deleteSelected(){
   const ids = [...document.querySelectorAll('.row-cb:checked')].map(cb=>cb.dataset.id);
   if(!ids.length) return;
   if(!confirm('هل أنت متأكد من حذف '+ids.length+' سجل؟\nلا يمكن التراجع.')) return;
   let arr = getStudents();
   arr = arr.filter(r=>!ids.includes(r.id));
-  saveStudents(arr);
+  await saveStudents(arr);
   alert('✅ تم حذف '+ids.length+' سجل');
   buildFilterOptions();
   renderRecords();
@@ -939,16 +981,32 @@ document.getElementById('clearSelBtn').addEventListener('click',()=>{
 
 /* ===== تهيئة ===== */
 updateFlag();
-/* تحميل البيانات السحابية أولاً ثم عرض الجلسة */
-initCloud().then(()=>{
-  renderSession();
-}).catch(()=>{
-  /* عند فشل الاتصال، تعمل الصفحة محلياً */
-  _cloudStudents = JSON.parse(localStorage.getItem(LS_KEY) || '[]');
-  const indicator = document.getElementById('cloudIndicator');
-  if(indicator) indicator.textContent = '⚠️ وضع محلي — تحقق من الاتصال';
-  renderSession();
-});
+
+/* انتظر Firebase ثم حمّل البيانات */
+function startApp(){
+  initCloud().then(()=>{
+    renderSession();
+  }).catch(()=>{
+    _cloudStudents = JSON.parse(localStorage.getItem(LS_KEY) || '[]');
+    const indicator = document.getElementById('cloudIndicator');
+    if(indicator) indicator.textContent = '⚠️ وضع محلي — تحقق من إعدادات Firebase';
+    renderSession();
+  });
+}
+
+if(window._fbReady){
+  startApp();
+} else {
+  window.addEventListener('firebase-ready', startApp, { once: true });
+  /* timeout احتياطي إذا فشل التحميل */
+  setTimeout(()=>{
+    if(!_cloudStudents){
+      _cloudStudents = JSON.parse(localStorage.getItem(LS_KEY) || '[]');
+      setIndicator('⚠️ لم يتصل Firebase — وضع محلي');
+      renderSession();
+    }
+  }, 6000);
+}
 </script>
 
 <script>
